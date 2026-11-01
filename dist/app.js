@@ -84,5 +84,5 @@ function showLobby(){if(!online||online.started)return;showModal(`<span class="e
 function startOnline(){const sorted=[...lobby].sort((a,b)=>a.slot-b.slot),oldConnections=new Map(connections);connections.clear();sorted.forEach((p,i)=>{if(oldConnections.has(p.slot)){const c=oldConnections.get(p.slot);c.gameSlot=i;connections.set(i,c)}p.slot=i});lobby=sorted;game=createGame(lobby.length,$('#net-difficulty').value,lobby.map(p=>p.name),lobby.map(p=>p.role));online.started=true;selected='kinshicho';save();broadcastState();closeModal();render();focusPlayer()}
 function broadcastState(){if(!online?.isHost||!game)return;connections.forEach((c,slot)=>{if(c.open)c.send({type:'state',state:game,slot})})}
 function showRoomInfo(){if(!online){showNetwork();return}if(!online.started){showLobby();return}showModal(`<span class="eyebrow">CONNECTED TEAM</span><h2>同じ地図の上で。</h2><div class="room-code">${escape(online.code)}</div><p>あなたは ${online.isHost?'ホスト':'プレイヤー '+(localSlot+1)}。行動順が回ってきたプレイヤーが操作します。ホストは、接続が切れた仲間の操作を引き継げます。</p><p class="network-tip">遠征開始後の途中参加・再接続はできません。通信をやめる場合は「遠征を保存して戻る」を選択してください。最後に同期した遠征を1台で再開できます。</p>`)}
-window.addEventListener('beforeunload',save);
+window.addEventListener('beforeunload',()=>{save();if(peer)peer.destroy()});
 render();initMap();

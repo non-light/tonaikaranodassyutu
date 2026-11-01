@@ -9,3 +9,5 @@ dialog{width:min(620px,calc(100% - 28px));max-height:90vh;overflow:auto;backgrou
 @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 
 @media(max-width:360px){.brand-light{display:none}.header nav{gap:14px}.brand small{letter-spacing:1px}.brand{font-size:23px}}
+
+@media(max-width:480px){.header{gap:12px}.header .brand{font-size:19px;letter-spacing:.5px}.header .brand-icon{width:28px;height:32px}.header nav{gap:12px}.header .text-btn{font-size:9px}}
