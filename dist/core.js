@@ -1,4 +1,14 @@
 import {SCENARIO,makeStory} from './story.js';
+export const DIFFICULTIES={
+ easy:{name:'簡単',rounds:30,foodBonus:6,ticketBonus:4,initialHeat:1,chaseAt:5,sprintAt:9,strikeLimit:4,exitHeat:7,description:'物資が多く、追跡はゆっくり。初めての帰国作戦に。'},
+ normal:{name:'普通',rounds:24,foodBonus:0,ticketBonus:0,initialHeat:2,chaseAt:3,sprintAt:7,strikeLimit:3,exitHeat:6,description:'物資と追跡を見ながら、協力と駆け引きを楽しむ。'},
+ hard:{name:'難しい',rounds:18,foodBonus:-2,ticketBonus:-2,initialHeat:3,chaseAt:2,sprintAt:5,strikeLimit:2,exitHeat:4,description:'物資は少なく、追跡は速い。限られた機会で脱出。'}
+};
+export function ruleSet(g){return g.version>=3?DIFFICULTIES[g.difficulty]||DIFFICULTIES.normal:{...DIFFICULTIES.normal,name:DIFFICULTIES[g.difficulty]?.name||'普通',rounds:g.limit}}
+export function activePlayers(g){return g.players.filter(p=>!p.escaped)}
+export function requiredRescuers(g,m){return Math.min(m.minPlayers||1,activePlayers(g).length)}
+export function exitHeatLimit(g){return Math.min(ruleSet(g).exitHeat,SCENARIO[g.story?.scenario]?.trait==='gate'?4:10)}
+export function scenarioTactic(g){const s=SCENARIO[g.story?.scenario];return s?.trait==='fast'?`機動力の高い追跡隊。追跡度${ruleSet(g).sprintAt-1}以上で1ラウンドに2区間進む。`:s?.tactic||''}
 export const ROLES=[
  {name:'探索者',en:'SCOUT',icon:'⌕',color:'#efb45d',perk:'探索で食料を追加で2つ発見'},
  {name:'整備士',en:'ENGINEER',icon:'⚙',color:'#79c9c0',perk:'鉄道の乗車券消費が1枚少ない'},
@@ -59,8 +69,9 @@ export const EVENTS=[
 ];
 export function createGame(count=1,difficulty='normal',names=[],roleIds=[],options={}){
  count=Math.floor(Math.max(1,Math.min(4,Number(count)||1)));
- const seed=Number.isInteger(options.seed)?options.seed>>>0:Math.floor(Math.random()*4294967296),story=makeStory(seed,count,options),scenario=SCENARIO[story.scenario];
- return {version:2,status:'playing',difficulty,round:1,limit:{easy:30,normal:24,hard:18}[difficulty]||24,turn:0,ap:2,event:0,seed,story,pursuit:{pos:scenario.start,target:null,heat:2,strikes:0,stunned:0},players:Array.from({length:count},(_,i)=>({id:i,name:(names[i]||`プレイヤー ${i+1}`).slice(0,16),role:roleIds[i]??i,pos:'kinshicho',hp:8,origin:story.origins[i],hiddenUntil:0,detained:0})),resources:{food:14+count*2,ticket:12+count*2,gear:0,signal:0},searched:[],log:[{round:1,text:`東京国が独立を宣言。「${scenario.title}」作戦開始。3つの帰国任務を遂行せよ。`}],goal:'haneda',ending:null};
+ difficulty=Object.hasOwn(DIFFICULTIES,difficulty)?difficulty:'normal';
+ const rules=DIFFICULTIES[difficulty],seed=Number.isInteger(options.seed)?options.seed>>>0:Math.floor(Math.random()*4294967296),story=makeStory(seed,count,options),scenario=SCENARIO[story.scenario];
+ return {version:3,status:'playing',difficulty,betrayal:count>1&&options.betrayal!==false,round:1,limit:rules.rounds,turn:0,ap:2,event:0,seed,story,pursuit:{pos:scenario.start,target:null,heat:rules.initialHeat,strikes:0,stunned:0},players:Array.from({length:count},(_,i)=>({id:i,name:(names[i]||`プレイヤー ${i+1}`).slice(0,16),role:roleIds[i]??i,pos:'kinshicho',hp:8,origin:story.origins[i],hiddenUntil:0,detained:0,escaped:false,escapeKind:null,escapeExit:null,escapeRound:null,betrayalUsed:false,borderPass:false})),resources:{food:14+count*2+rules.foodBonus,ticket:12+count*2+rules.ticketBonus,gear:0,signal:0},searched:[],log:[{round:1,text:`東京国が独立を宣言。「${scenario.title}」作戦開始。難易度：${rules.name}。${count>1&&options.betrayal!==false?'裏切りあり。':'全員での帰国を目指す。'}`}],goal:'haneda',ending:null};
 }
 export function log(g,text){g.log.unshift({round:g.round,text});g.log=g.log.slice(0,50)}
 export function neighbors(pos){return EDGES.filter(e=>e.a===pos||e.b===pos).map(e=>({...e,to:e.a===pos?e.b:e.a}))}
@@ -75,14 +86,35 @@ export function moveCost(g,to,mode='rail'){
  if(mountain&&g.resources.gear<1)return{error:'山道には山装備が1つ以上必要です。',hp,ticket};
  return {hp,ticket,walk,mountain,edge:e};
 }
-export function escapeCheck(g,exitId){const exit=EXITS.find(e=>e.id===exitId);if(!exit)return {ok:false,reasons:['脱出地点を選んでください。']};const reasons=[];if(g.players.some(p=>p.pos!==exit.node))reasons.push('全員がこの地点に集合する');for(const[k,v]of Object.entries(exit.need))if(g.resources[k]<v)reasons.push(`${RES[k].label} あと${v-g.resources[k]}`);if(g.story){const remaining=g.story.missions.filter(m=>!m.done).length;if(remaining)reasons.push(`帰国任務 あと${remaining}件`);const threshold=SCENARIO[g.story.scenario].trait==='gate'?4:6;if(g.pursuit.heat>threshold)reasons.push(`追跡度を${threshold}以下に下げる`);if(g.pursuit.pos===exit.node&&!g.pursuit.stunned)reasons.push('追跡隊を陽動して出口から離す');}return{ok:reasons.length===0,reasons,exit}}
+export function escapeCheck(g,exitId){const exit=EXITS.find(e=>e.id===exitId);if(!exit)return {ok:false,reasons:['脱出地点を選んでください。']};const reasons=[];if(activePlayers(g).some(p=>p.pos!==exit.node))reasons.push('未脱出の全員がこの地点に集合する');for(const[k,v]of Object.entries(exit.need))if(g.resources[k]<v)reasons.push(`${RES[k].label} あと${v-g.resources[k]}`);if(g.story){const remaining=g.story.missions.filter(m=>!m.done).length;if(remaining)reasons.push(`帰国任務 あと${remaining}件`);const threshold=exitHeatLimit(g);if(g.pursuit.heat>threshold)reasons.push(`追跡度を${threshold}以下に下げる`);if(g.pursuit.pos===exit.node&&!g.pursuit.stunned)reasons.push('追跡隊を陽動して出口から離す');}return{ok:reasons.length===0,reasons,exit}}
+export function soloEscapeCheck(g,exitId=NODE[g.players[g.turn].pos].exit){
+ const p=g.players[g.turn],exit=EXITS.find(e=>e.id===exitId),reasons=[];
+ if(!g.betrayal||g.players.length<2)reasons.push('この遠征は裏切りなしのルールです。');
+ if(p.escaped)reasons.push('すでに脱出しています。');
+ if(!exit||p.pos!==exit.node)reasons.push('脱出地点まで移動する');
+ if(!g.story?.missions.find(m=>m.id==='proof')?.done)reasons.push('先にAの証明書回収を達成する');
+ const need=exit?Object.fromEntries(Object.entries(exit.need).map(([k,v])=>[k,Math.ceil(v/2)])):{};
+ for(const[k,v]of Object.entries(need))if(g.resources[k]<v)reasons.push(`${RES[k].label} あと${v-g.resources[k]}`);
+ if(g.pursuit&&g.pursuit.heat>exitHeatLimit(g)&&!p.borderPass)reasons.push(`追跡度を${exitHeatLimit(g)}以下に下げるか、密告で個人通行証を得る`);
+ if(exit&&g.pursuit?.pos===exit.node&&!g.pursuit.stunned)reasons.push('追跡隊を陽動して出口を通れる状態にする');
+ return{ok:reasons.length===0,reasons,exit,need};
+}
+export function denounceCheck(g,targetId){
+ const p=g.players[g.turn],target=g.players.find(x=>x.id===targetId),reasons=[];
+ if(!g.betrayal||g.players.length<2)reasons.push('この遠征は裏切りなしのルールです。');
+ if(p.escaped)reasons.push('脱出済みの人は行動できません。');
+ if(p.betrayalUsed)reasons.push('密告は1人につき1回までです。');
+ if(!target||target.id===p.id||target.escaped)reasons.push('未脱出の仲間を選んでください。');
+ return{ok:reasons.length===0,reasons,target};
+}
+function markEscaped(g,p,kind,exitId){p.escaped=true;p.escapeKind=kind;p.escapeExit=exitId;p.escapeRound=g.round;p.hiddenUntil=0}
 export function missionCheck(g,missionId){
  const m=g.story?.missions.find(x=>x.id===missionId),p=g.players[g.turn],reasons=[];
  if(!m)return{ok:false,reasons:['この任務はありません。']};
  if(m.done)reasons.push('この任務は達成済みです。');
  if(!m.nodes.includes(p.pos))reasons.push(`実行地点：${m.nodes.map(id=>NODE[id].name).join(' または ')}`);
  if(m.requires?.some(id=>!g.story.missions.find(x=>x.id===id)?.done))reasons.push('先に証明書回収と救出の任務を達成する');
- if(m.minPlayers&&g.players.filter(x=>x.pos===p.pos).length<m.minPlayers)reasons.push(`仲間${m.minPlayers}人が同じ地点に集合する`);
+ const required=requiredRescuers(g,m);if(activePlayers(g).filter(x=>x.pos===p.pos).length<required)reasons.push(`仲間${required}人が同じ地点に集合する`);
  for(const[k,v]of Object.entries(m.need))if(g.resources[k]<v)reasons.push(`${RES[k].label} あと${v-g.resources[k]}`);
  return{ok:reasons.length===0,reasons,mission:m};
 }
@@ -95,42 +127,45 @@ function noise(g,p,type){if(!g.pursuit)return;const trait=SCENARIO[g.story.scena
 function intercept(g,players){
  if(!players.length||g.pursuit.stunned)return;g.pursuit.strikes++;g.pursuit.heat=Math.max(0,g.pursuit.heat-2);g.resources.food=Math.max(0,g.resources.food-2);
  for(const p of players){p.pos='kinshicho';p.hp=Math.max(0,p.hp-2);p.detained=1;p.hiddenUntil=0}
- log(g,`追跡隊に発見された（${g.pursuit.strikes}/3回）。${players.map(p=>p.name).join('・')}は錦糸町へ送還。体力−2、次の手番は1行動。食料を2没収。`);
- if(g.pursuit.strikes>=3){g.status='lost';g.ending='captured';log(g,'3度目の拘束。国境が完全封鎖され、帰国の機会を失った。')}
+ const maximum=ruleSet(g).strikeLimit;log(g,`追跡隊に発見された（${g.pursuit.strikes}/${maximum}回）。${players.map(p=>p.name).join('・')}は錦糸町へ送還。体力−2、次の手番は1行動。食料を2没収。`);
+ if(g.pursuit.strikes>=maximum){g.status='lost';g.ending='captured';log(g,`${maximum}度目の拘束。国境が完全封鎖され、残った人は帰国の機会を失った。`)}
 }
 function advancePursuit(g){
- if(!g.pursuit)return;const q=g.pursuit,scenario=SCENARIO[g.story.scenario];
+ if(!g.pursuit)return;const q=g.pursuit,scenario=SCENARIO[g.story.scenario],rules=ruleSet(g),players=activePlayers(g);
  if(q.stunned){q.stunned--;log(g,'陽動に成功。追跡隊はこのラウンド移動しない。');return}
  if(scenario.trait==='sweep')q.heat=Math.min(10,q.heat+1);
  const caught=new Set();
- if(q.heat>=3&&q.target){const steps=q.heat>=(scenario.trait==='fast'?6:7)?2:1;for(let i=0;i<steps&&q.pos!==q.target;i++){const e=neighbors(q.pos).sort((a,b)=>pursuitDistance(a.to,q.target)-pursuitDistance(b.to,q.target))[0];if(e)q.pos=e.to;g.players.filter(p=>p.pos===q.pos&&!isHidden(g,p)).forEach(p=>caught.add(p))}}
- g.players.filter(p=>p.pos===q.pos&&!isHidden(g,p)).forEach(p=>caught.add(p));intercept(g,[...caught]);
- log(g,`${scenario.pursuer}：現在地は${NODE[q.pos].name}。${q.heat>=3&&q.target?`最後の目撃情報「${NODE[q.target].name}」を追跡中。`:'手がかりを見失っている。'}`);
+ if(q.heat>=rules.chaseAt&&q.target){const steps=q.heat>=rules.sprintAt-(scenario.trait==='fast'?1:0)?2:1;for(let i=0;i<steps&&q.pos!==q.target;i++){const e=neighbors(q.pos).sort((a,b)=>pursuitDistance(a.to,q.target)-pursuitDistance(b.to,q.target))[0];if(e)q.pos=e.to;players.filter(p=>p.pos===q.pos&&!isHidden(g,p)).forEach(p=>caught.add(p))}}
+ players.filter(p=>p.pos===q.pos&&!isHidden(g,p)).forEach(p=>caught.add(p));intercept(g,[...caught]);
+ log(g,`${scenario.pursuer}：現在地は${NODE[q.pos].name}。${q.heat>=rules.chaseAt&&q.target?`最後の目撃情報「${NODE[q.target].name}」を追跡中。`:'手がかりを見失っている。'}`);
 }
 export function act(state,action){
  const g=structuredClone(state);if(g.status!=='playing')return{error:'この遠征は終了しています。'};
- const p=g.players[g.turn];if(action.type==='goal'){if(!EXITS.some(e=>e.id===action.goal))return{error:'不明なルートです。'};g.goal=action.goal;return{state:g}}
+ const p=g.players[g.turn];if(p.escaped)return{error:'脱出済みの人は行動できません。'};if(action.type==='goal'){if(!EXITS.some(e=>e.id===action.goal))return{error:'不明なルートです。'};g.goal=action.goal;return{state:g}}
  if(action.type==='end'){nextTurn(g);return{state:g}}
- if(action.type==='escape'){const check=escapeCheck(g,NODE[p.pos].exit);if(!check.ok)return{error:check.reasons.join(' / ')};for(const[k,v]of Object.entries(check.exit.need))g.resources[k]-=v;g.status='won';g.ending=check.exit.id;log(g,`全員が「${check.exit.name}」で脱出に成功した。`);return{state:g}}
+ if(action.type==='escape'){const check=escapeCheck(g,NODE[p.pos].exit);if(!check.ok)return{error:check.reasons.join(' / ')};for(const[k,v]of Object.entries(check.exit.need))g.resources[k]-=v;activePlayers(g).forEach(x=>markEscaped(g,x,'team',check.exit.id));g.status='won';g.ending=check.exit.id;log(g,`残っていた全員が「${check.exit.name}」で脱出に成功した。`);return{state:g}}
+ if(action.type==='soloEscape'){const check=soloEscapeCheck(g);if(!check.ok)return{error:check.reasons.join(' / ')};for(const[k,v]of Object.entries(check.need))g.resources[k]-=v;markEscaped(g,p,'solo',check.exit.id);p.borderPass=false;log(g,`${p.name}が仲間を待たず、「${check.exit.name}」から単独脱出した。残された人の遠征は続く。`);if(!activePlayers(g).length){g.status='won';g.ending='separate'}else nextTurn(g);return{state:g}}
  if(g.ap<=0)return{error:'行動を終えて、次の仲間に交代してください。'};
  if(action.type==='move'){const c=moveCost(g,action.to,action.mode);if(c.error)return{error:c.error};p.hp-=c.hp;g.resources.ticket-=c.ticket;p.pos=action.to;if(g.story){p.hiddenUntil=0;if(!c.walk)noise(g,p,'rail')}log(g,`${p.name} → ${NODE[p.pos].name}（${c.walk?'徒歩・目撃情報なし':c.edge.name}）`)}
  else if(action.type==='search'){if(g.searched.includes(p.pos))return{error:'この地点は探索済みです。'};const k=NODE[p.pos].loot,v={food:6,ticket:5,gear:2,signal:2}[k];g.resources[k]+=v;if(p.role===0)g.resources.food+=2;g.searched.push(p.pos);noise(g,p,'search');log(g,`${p.name}が${NODE[p.pos].name}で${RES[k].label}を${v}発見${p.role===0?'。食料も2獲得':''}。`)}
- else if(action.type==='rest'){if(g.resources.food<1)return{error:'休息には食料が1つ必要です。'};g.resources.food--;p.hp=Math.min(8,p.hp+4);if(p.role===2)g.players.forEach(other=>other.hp=Math.min(8,other.hp+2));log(g,`${p.name}が休息して体力を回復した。`)}
+ else if(action.type==='rest'){if(g.resources.food<1)return{error:'休息には食料が1つ必要です。'};g.resources.food--;p.hp=Math.min(8,p.hp+4);if(p.role===2)activePlayers(g).forEach(other=>other.hp=Math.min(8,other.hp+2));log(g,`${p.name}が休息して体力を回復した。`)}
  else if(action.type==='mission'){const check=missionCheck(g,action.id);if(!check.ok)return{error:check.reasons.join(' / ')};const m=check.mission;for(const[k,v]of Object.entries(m.need))g.resources[k]-=v;for(const[k,v]of Object.entries(m.reward))g.resources[k]+=v;m.done=true;m.by=p.id;noise(g,p,'mission');if(m.kind==='transmit')g.pursuit.heat=Math.max(0,g.pursuit.heat-3);log(g,`任務達成：${m.title}（${p.name}）。`)}
  else if(action.type==='hide'){if(!g.pursuit)return{error:'この遠征では潜伏を使いません。'};g.pursuit.heat=Math.max(0,g.pursuit.heat-3);p.hiddenUntil=g.round+1;log(g,`${p.name}が路地に潜伏。追跡度−3。次のラウンドまで発見を防ぐ。`)}
  else if(action.type==='decoy'){if(!g.pursuit)return{error:'この遠征では陽動を使いません。'};if(g.resources.signal<1)return{error:'陽動には通信機が1つ必要です。'};g.resources.signal--;g.pursuit.heat=Math.max(0,g.pursuit.heat-4);g.pursuit.stunned=1;g.pursuit.target=null;p.hiddenUntil=g.round+1;log(g,`${p.name}が偽の目撃情報を流した。追跡度−4、追跡隊を1ラウンド足止め。`)}
+ else if(action.type==='denounce'){const check=denounceCheck(g,action.target);if(!check.ok)return{error:check.reasons.join(' / ')};p.betrayalUsed=true;p.borderPass=true;check.target.hiddenUntil=0;g.pursuit.target=check.target.pos;g.pursuit.heat=Math.min(10,g.pursuit.heat+3);log(g,`裏切り：${p.name}が${check.target.name}の居場所「${NODE[check.target.pos].name}」を密告。追跡度+3、対象の潜伏を解除。${p.name}は個人通行証を得た。`)}
  else return{error:'不明な行動です。'};
  g.ap--;if(g.pursuit&&['move','search','mission'].includes(action.type)&&p.pos===g.pursuit.pos&&!isHidden(g,p))intercept(g,[p]);return{state:g};
 }
 function nextTurn(g){
+ const active=activePlayers(g);if(!active.length){g.status='won';g.ending='separate';return}
  const setAP=()=>{const p=g.players[g.turn];g.ap=p.detained?1:2;p.detained=0};
- if(g.turn<g.players.length-1){g.turn++;setAP();return}
- g.turn=0;g.ap=2;g.round++;
+ const next=active.find(p=>p.id>g.turn);if(next){g.turn=next.id;setAP();return}
+ g.turn=active[0].id;g.ap=2;g.round++;
  if(g.round>g.limit){g.status='lost';g.ending='time';log(g,'すべての脱出便が締め切られた。遠征はここで終了。');return}
- const eaten=Math.min(g.resources.food,g.players.length);g.resources.food-=eaten;if(eaten<g.players.length){g.players.forEach(p=>p.hp=Math.max(0,p.hp-2));log(g,'食料不足。全員の体力が2減った。探索を急ごう。')}
+ const eaten=Math.min(g.resources.food,active.length);g.resources.food-=eaten;if(eaten<active.length){active.forEach(p=>p.hp=Math.max(0,p.hp-2));log(g,'食料不足。未脱出の全員の体力が2減った。探索を急ごう。')}
  g.event=1+((g.round+g.seed)%6);if(EVENTS[g.event].kind==='supply')g.resources.food+=4;if(EVENTS[g.event].kind==='radio')g.resources.signal++;
  log(g,`${EVENTS[g.event].name}：${EVENTS[g.event].text}`);
  advancePursuit(g);if(g.status!=='playing')return;setAP();
- const anyProgress=g.players.some((p,i)=>{if(!g.searched.includes(p.pos)||g.resources.food>0)return true;const view={...g,turn:i};return neighbors(p.pos).some(e=>!moveCost(view,e.to,'rail').error||!moveCost(view,e.to,'foot').error)||g.story?.missions.some(m=>!m.done&&missionCheck(view,m.id).ok)});
+ const anyProgress=active.some(p=>{if(!g.searched.includes(p.pos)||g.resources.food>0)return true;const view={...g,turn:p.id};return neighbors(p.pos).some(e=>!moveCost(view,e.to,'rail').error||!moveCost(view,e.to,'foot').error)||g.story?.missions.some(m=>!m.done&&missionCheck(view,m.id).ok)||g.betrayal&&soloEscapeCheck(view).ok});
  if(!anyProgress){g.status='lost';g.ending='exhausted';log(g,'食料と体力が尽き、全員が移動できなくなった。')}
 }
