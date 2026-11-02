@@ -71,7 +71,7 @@ export function createGame(count=1,difficulty='normal',names=[],roleIds=[],optio
  count=Math.floor(Math.max(1,Math.min(4,Number(count)||1)));
  difficulty=Object.hasOwn(DIFFICULTIES,difficulty)?difficulty:'normal';
  const rules=DIFFICULTIES[difficulty],seed=Number.isInteger(options.seed)?options.seed>>>0:Math.floor(Math.random()*4294967296),story=makeStory(seed,count,options),scenario=SCENARIO[story.scenario];
- return {version:3,status:'playing',difficulty,betrayal:count>1&&options.betrayal!==false,round:1,limit:rules.rounds,turn:0,ap:2,event:0,seed,story,pursuit:{pos:scenario.start,target:null,heat:rules.initialHeat,strikes:0,stunned:0},players:Array.from({length:count},(_,i)=>({id:i,name:(names[i]||`プレイヤー ${i+1}`).slice(0,16),role:roleIds[i]??i,pos:'kinshicho',hp:8,origin:story.origins[i],hiddenUntil:0,detained:0,escaped:false,escapeKind:null,escapeExit:null,escapeRound:null,betrayalUsed:false,borderPass:false})),resources:{food:14+count*2+rules.foodBonus,ticket:12+count*2+rules.ticketBonus,gear:0,signal:0},searched:[],log:[{round:1,text:`東京国が独立を宣言。「${scenario.title}」作戦開始。難易度：${rules.name}。${count>1&&options.betrayal!==false?'裏切りあり。':'全員での帰国を目指す。'}`}],goal:'haneda',ending:null};
+ return {version:3,status:'playing',difficulty,betrayal:count>1&&options.betrayal!==false,round:1,limit:rules.rounds,turn:0,ap:2,event:0,seed,story,pursuit:{pos:scenario.start,target:null,heat:rules.initialHeat,strikes:0,stunned:0},players:Array.from({length:count},(_,i)=>({id:i,name:(names[i]||`プレイヤー ${i+1}`).slice(0,16),role:roleIds[i]??i,pos:'kinshicho',hp:8,origin:story.origins[i],hiddenUntil:0,detained:0,escaped:false,escapeKind:null,escapeExit:null,escapeRound:null,betrayalUsed:false,borderPass:false})),resources:{food:14+count*2+rules.foodBonus,ticket:12+count*2+rules.ticketBonus,gear:0,signal:0},searched:[],log:[{round:1,text:`東京国が独立を宣言。「${scenario.title}」作戦開始。難易度：${rules.name}。帰国作戦が始まった。`}],goal:'haneda',ending:null};
 }
 export function log(g,text){g.log.unshift({round:g.round,text});g.log=g.log.slice(0,50)}
 export function neighbors(pos){return EDGES.filter(e=>e.a===pos||e.b===pos).map(e=>({...e,to:e.a===pos?e.b:e.a}))}
@@ -89,7 +89,7 @@ export function moveCost(g,to,mode='rail'){
 export function escapeCheck(g,exitId){const exit=EXITS.find(e=>e.id===exitId);if(!exit)return {ok:false,reasons:['脱出地点を選んでください。']};const reasons=[];if(activePlayers(g).some(p=>p.pos!==exit.node))reasons.push('未脱出の全員がこの地点に集合する');for(const[k,v]of Object.entries(exit.need))if(g.resources[k]<v)reasons.push(`${RES[k].label} あと${v-g.resources[k]}`);if(g.story){const remaining=g.story.missions.filter(m=>!m.done).length;if(remaining)reasons.push(`帰国任務 あと${remaining}件`);const threshold=exitHeatLimit(g);if(g.pursuit.heat>threshold)reasons.push(`追跡度を${threshold}以下に下げる`);if(g.pursuit.pos===exit.node&&!g.pursuit.stunned)reasons.push('追跡隊を陽動して出口から離す');}return{ok:reasons.length===0,reasons,exit}}
 export function soloEscapeCheck(g,exitId=NODE[g.players[g.turn].pos].exit){
  const p=g.players[g.turn],exit=EXITS.find(e=>e.id===exitId),reasons=[];
- if(!g.betrayal||g.players.length<2)reasons.push('この遠征は裏切りなしのルールです。');
+ if(!g.betrayal||g.players.length<2)reasons.push('この遠征ではその行動を選べません。');
  if(p.escaped)reasons.push('すでに脱出しています。');
  if(!exit||p.pos!==exit.node)reasons.push('脱出地点まで移動する');
  if(!g.story?.missions.find(m=>m.id==='proof')?.done)reasons.push('先にAの証明書回収を達成する');
@@ -101,7 +101,7 @@ export function soloEscapeCheck(g,exitId=NODE[g.players[g.turn].pos].exit){
 }
 export function denounceCheck(g,targetId){
  const p=g.players[g.turn],target=g.players.find(x=>x.id===targetId),reasons=[];
- if(!g.betrayal||g.players.length<2)reasons.push('この遠征は裏切りなしのルールです。');
+ if(!g.betrayal||g.players.length<2)reasons.push('この遠征ではその行動を選べません。');
  if(p.escaped)reasons.push('脱出済みの人は行動できません。');
  if(p.betrayalUsed)reasons.push('密告は1人につき1回までです。');
  if(!target||target.id===p.id||target.escaped)reasons.push('未脱出の仲間を選んでください。');
